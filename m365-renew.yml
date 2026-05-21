@@ -1,0 +1,84 @@
+name: Microsoft 365 Renew Activity
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Get Microsoft Graph token
+        run: |
+          TOKEN_RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "client_id=${{ secrets.CLIENT_ID }}" \
+            -d "scope=https://graph.microsoft.com/.default" \
+            -d "client_secret=${{ secrets.CLIENT_SECRET }}" \
+            -d "grant_type=client_credentials" \
+            "https://login.microsoftonline.com/${{ secrets.TENANT_ID }}/oauth2/v2.0/token")
+
+          TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token')
+
+          if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
+            echo "Cannot get token"
+            echo "$TOKEN_RESPONSE"
+            exit 1
+          fi
+
+          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+
+      - name: Read users
+        run: |
+          curl -s -H "Authorization: Bearer $TOKEN" \
+          "https://graph.microsoft.com/v1.0/users?$top=5"
+
+      - name: Read groups
+        run: |
+          curl -s -H "Authorization: Bearer $TOKEN" \
+          "https://graph.microsoft.com/v1.0/groups?$top=5"
+
+      - name: Read SharePoint site
+        run: |
+          curl -s -H "Authorization: Bearer $TOKEN" \
+          "https://graph.microsoft.com/v1.0/sites/${{ secrets.SITE_ID }}"
+
+      - name: Create SharePoint activity item
+        run: |
+          TODAY=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://graph.microsoft.com/v1.0/sites/${{ secrets.SITE_ID }}/lists/${{ secrets.LIST_ID }}/items" \
+            -d "{
+              \"fields\": {
+                \"Title\": \"GitHub Actions Developer Activity\",
+                \"RunDate\": \"$TODAY\",
+                \"Status\": \"Success\"
+              }
+            }")
+
+          echo "$RESPONSE"
+
+      - name: Write local activity log
+        run: |
+          mkdir -p logs
+          echo "M365 activity run at $(date -u)" >> logs/activity.log
+
+      - name: Commit activity log
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add logs/activity.log
+          git commit -m "Add M365 activity log" || echo "No changes to commit"
+          git push
