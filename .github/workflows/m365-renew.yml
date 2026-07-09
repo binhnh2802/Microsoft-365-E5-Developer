@@ -85,8 +85,16 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
+          git stash push -u -m "activity-log" -- logs/activity.log || true
           git pull --rebase origin main
+          git stash pop || true
 
           git add logs/activity.log
-          git commit -m "Add M365 activity log" || exit 0
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "Add M365 activity log"
+          git pull --rebase origin main
           git push origin HEAD:main
